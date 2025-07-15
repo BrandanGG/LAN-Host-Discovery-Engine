@@ -1,19 +1,47 @@
-from config import Config
+import sqlite3
+from datetime import datetime
+import click
+from flask import current_app, g
 
-def get_db_config():
-    try:
-        config = Config.from_yaml('config.yaml')
-        return {
-            'hostname': config.db_hostname,
-            'username': config.db_username,
-            'password': config.db_password
-        }
-    except (FileNotFoundError, ValueError) as e:
-        print(f"Error loading database configuration: {str(e)}")
-        raise
+# get the database connection
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(
+            current_app.config['DATABASE'],
+            detect_types=sqlite3.PARSE_DECLTYPES
+        )
+        g.db.row_factory = sqlite3.Row
 
-def read_db(config:dict):
-    pass
+    return g.db
 
-def write_db(config:dict):
-    pass
+# close the database connection
+def close_db(e=None):
+    db = g.pop('db', None)
+
+    if db is not None:
+        db.close()
+
+# initialize the database
+def init_db():
+    db = get_db()
+
+    with current_app.open_resource('schema.sql') as f:
+        db.executescript(f.read().decode('utf8'))
+
+# initialize the database command
+@click.command('init-db')
+def init_db_command():
+    """Clear the existing data and create new tables."""
+    init_db()
+    click.echo('Initialized the database.')
+
+
+# register the timestamp converter
+sqlite3.register_converter(
+    "timestamp", lambda v: datetime.fromisoformat(v.decode())
+)
+
+# initialize the app
+def init_app(app):
+    app.teardown_appcontext(close_db)
+    app.cli.add_command(init_db_command)
